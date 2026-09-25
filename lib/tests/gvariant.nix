@@ -231,6 +231,46 @@ lib.runTests {
     );
     expected = "@(ua{su}au) (1,[{'key',2}],[])";
   };
+  testContextDependentContainers = {
+    expr =
+      map
+        ({ value, type }: {
+          inferredType = (builtins.tryEval value.type).success;
+          standalone = (builtins.tryEval (toString value)).success;
+          annotated = toString (gvariant.mkTyped type value);
+        })
+        [
+          {
+            value = gvariant.mkTuple [ 1 ];
+            type = "(u)";
+          }
+          {
+            value = gvariant.mkTuple [ [ ] ];
+            type = "(au)";
+          }
+          {
+            value = gvariant.mkDictionaryEntry "key" 1;
+            type = "{su}";
+          }
+          {
+            value = gvariant.mkDictionaryEntry "key" [ ];
+            type = "{sau}";
+          }
+        ];
+    expected =
+      map
+        (annotated: {
+          inferredType = false;
+          standalone = false;
+          inherit annotated;
+        })
+        [
+          "@(u) (1,)"
+          "@(au) ([],)"
+          "@{su} {'key',1}"
+          "@{sau} {'key',[]}"
+        ];
+  };
   testTypedExplicitInt = {
     expr = toString (gvariant.mkTyped "u" (gvariant.mkInt32 1));
     expected = "@u @i 1";

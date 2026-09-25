@@ -79,6 +79,12 @@ rec {
     lists and empty arrays. Explicit scalar constructors, arrays, annotations,
     casts, and variant contents retain their own type constraints.
 
+    Tuples and dictionary entries containing raw integers or empty lists can
+    be context-dependent intermediates: forcing their `.type` or standalone
+    `toString` may throw because those members have no inferred type.
+    `mkTyped` can serialize them through their unannotated rendering path,
+    without forcing that inferred type; the surrounding annotation supplies it.
+
     As with the other constructors, the caller must provide a valid type and
     a compatible value. GLib validates the type string, numeric ranges, and
     compatibility when parsing the result; this helper does not remove
@@ -458,6 +464,12 @@ rec {
   /**
     Returns the GVariant dictionary entry from the given key and value.
 
+    With raw integers or empty lists, the result is a context-dependent
+    intermediate: forcing `.type` or standalone `toString` may throw.
+    Use `mkTyped` with a compatible surrounding type to serialize the entry
+    through its unannotated rendering path instead, or use explicitly typed
+    members for a standalone entry.
+
     # Inputs
 
     `name`
@@ -570,6 +582,12 @@ rec {
 
   /**
     Returns the GVariant tuple from the given Nix list.
+
+    With raw integers or empty lists as members, the result is a
+    context-dependent intermediate: forcing `.type` or standalone `toString`
+    may throw. Use `mkTyped` with a compatible surrounding type to serialize
+    the tuple through its unannotated rendering path instead, or use
+    explicitly typed members for a standalone tuple.
 
     # Inputs
 

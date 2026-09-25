@@ -1,4 +1,6 @@
 # Integration test: nix-build lib/tests/gvariant-parser.nix
+# `expected` is a semantic GVariant reference parsed by GLib, not exact output text.
+# Use `text` for an additional exact serialization assertion.
 {
   pkgs ? import ../.. {
     config = { };
