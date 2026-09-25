@@ -63,7 +63,7 @@ lib.runTests {
         type = "v";
       }
       {
-        text = "@(su) @(su) ('key',@u 5)";
+        text = "@(su) ('key',@u 5)";
         type = "(su)";
       }
     ];
@@ -217,7 +217,23 @@ lib.runTests {
   };
   testTypedSingletonTuple = {
     expr = toString (gvariant.mkTyped "(s)" (gvariant.mkTuple [ "one" ]));
-    expected = "@(s) @(s) ('one',)";
+    expected = "@(s) ('one',)";
+  };
+  testTypedNestedInferred = {
+    expr = toString (
+      gvariant.mkTyped "(ua{su}au)" (
+        gvariant.mkTuple [
+          1
+          [ (gvariant.mkDictionaryEntry "key" 2) ]
+          [ ]
+        ]
+      )
+    );
+    expected = "@(ua{su}au) (1,[{'key',2}],[])";
+  };
+  testTypedExplicitInt = {
+    expr = toString (gvariant.mkTyped "u" (gvariant.mkInt32 1));
+    expected = "@u @i 1";
   };
   testMkTypedInteger = {
     expr = toString (gvariant.mkTyped "u" 5);

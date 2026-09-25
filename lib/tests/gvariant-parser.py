@@ -33,6 +33,13 @@ def parse(text):
 with open(sys.argv[2]) as source:
     cases = json.load(source)
 for case in cases:
+    if case.get("invalid", False):
+        try:
+            actual = parse(case["text"])
+        except AssertionError:
+            continue
+        glib.g_variant_unref(actual)
+        raise AssertionError(f"GLib accepted conflicting annotations: {case['text']}")
     actual = parse(case["text"])
     expected = parse(case["expected"])
     try:

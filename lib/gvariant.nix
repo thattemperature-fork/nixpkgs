@@ -34,7 +34,7 @@ let
   renderAnnotated =
     v:
     if lib.gvariant.isGVariant v then
-      toString v
+      if v ? __unannotatedString then v.__unannotatedString v else v.__annotatedString or (toString v)
     else if builtins.isList v then
       "[${concatMapStringsSep "," renderAnnotated v}]"
     else if builtins.isString v then
@@ -74,15 +74,16 @@ rec {
   /**
     Annotate a value with a GVariant type string, without converting it.
     Scalars are serialized without an inferred type, lists become arrays (also
-    when empty), and `null` becomes `nothing`. Existing GVariant values retain
-    their own annotations; use the tuple, dictionary-entry, and variant
-    constructors for those containers. Nested lists inherit their element
-    types from the surrounding annotation.
+    when empty), and `null` becomes `nothing`. Tuples and dictionary entries
+    inherit their types from the surrounding annotation, including nested
+    lists and empty arrays. Explicit scalar constructors, arrays, annotations,
+    casts, and variant contents retain their own type constraints.
 
     As with the other constructors, the caller must provide a valid type and
     a compatible value. GLib validates the type string, numeric ranges, and
-    compatibility when parsing the result; this helper does not coerce values
-    or remove conflicting annotations.
+    compatibility when parsing the result; this helper does not remove
+    explicit annotations. GLib gives an outer type precedence over nested
+    annotations where the literal is compatible with that outer type.
 
     # Inputs
 
@@ -498,6 +499,7 @@ rec {
     mkPrimitive dictionaryType { inherit name value; }
     // {
       __toString = self: "@${self.type} {${name'},${value'}}";
+      __unannotatedString = _: "{${renderAnnotated name},${renderAnnotated value}}";
     };
 
   /**
@@ -594,6 +596,11 @@ rec {
         "@${self.type} (${concatMapStringsSep "," toString self.value}${
           lib.optionalString (builtins.length self.value == 1) ","
         })";
+      __unannotatedString =
+        _:
+        "(${concatMapStringsSep "," renderAnnotated elems}${
+          lib.optionalString (builtins.length elems == 1) ","
+        })";
     };
 
   /**
@@ -615,6 +622,7 @@ rec {
     v:
     mkPrimitive type.boolean v
     // {
+      __annotatedString = "@b ${if v then "true" else "false"}";
       __toString = self: if self.value then "true" else "false";
     };
 
@@ -640,6 +648,7 @@ rec {
     in
     mkPrimitive type.string v
     // {
+      __annotatedString = "@s '${sanitize v}'";
       __toString = self: "'${sanitize self.value}'";
     };
 
@@ -717,6 +726,7 @@ rec {
     v:
     mkPrimitive type.int32 v
     // {
+      __annotatedString = "@i ${toString v}";
       __toString = self: toString self.value;
     };
 
@@ -772,6 +782,7 @@ rec {
     v:
     mkPrimitive type.double v
     // {
+      __annotatedString = "@d ${toString v}";
       __toString = self: toString self.value;
     };
 }
