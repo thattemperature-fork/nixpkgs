@@ -28,6 +28,7 @@ in
 pkgsBB.symlinkJoin {
   name = "nixpkgs-lib-tests";
   paths = map testWithNix nixVersions ++ [
+    (import ./gvariant-parser.nix { pkgs = pkgsBB; })
     (import ./nix-unit.nix {
       inherit pkgs;
     })

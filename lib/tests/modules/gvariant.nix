@@ -39,26 +39,28 @@
         mkLine = n: v: "${n} = ${toString (lib.gvariant.mkValue v)}";
         result = lib.concatStringsSep "\n" (lib.mapAttrsToList mkLine config.examples);
       in
-      (result + "\n") == ''
-        array1 = @as ['one']
-        array2 = @ai [1]
-        array3 = @au [@u 2]
-        bool = true
-        dictionaryEntry = @{ias} {1,@as ['foo']}
-        emptyArray = @au []
-        escapedString = '\'\\\n'
-        float = 3.140000
-        int16 = @n -42
-        int32 = -42
-        int64 = @x -42
-        maybe1 = @ms nothing
-        maybe2 = just @u 4
-        string = 'foo'
-        tuple = @(ias) (1,@as ['foo'])
-        uint16 = @q 42
-        uint32 = @u 42
-        uint64 = @t 42
-        variant = <'foo'>
-      '';
+      import ../gvariant.nix == [ ]
+      &&
+        (result + "\n") == ''
+          array1 = @as ['one']
+          array2 = @ai [1]
+          array3 = @au [@u 2]
+          bool = true
+          dictionaryEntry = @{ias} {1,@as ['foo']}
+          emptyArray = @au []
+          escapedString = '\'\\\n'
+          float = 3.140000
+          int16 = @n -42
+          int32 = -42
+          int64 = @x -42
+          maybe1 = @ms nothing
+          maybe2 = just @u 4
+          string = 'foo'
+          tuple = @(ias) (1,@as ['foo'])
+          uint16 = @q 42
+          uint32 = @u 42
+          uint64 = @t 42
+          variant = <'foo'>
+        '';
   };
 }

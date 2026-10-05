@@ -29,6 +29,25 @@ let
     __toString = self: "@${self.type} ${toString self.value}"; # https://docs.gtk.org/glib/gvariant-text.html
   };
 
+  # Leave type inference to the surrounding annotation. mkValue would reject
+  # integers and empty lists, and annotate arrays before the type can apply.
+  renderAnnotated =
+    v:
+    if lib.gvariant.isGVariant v then
+      if v ? __unannotatedString then v.__unannotatedString v else v.__annotatedString or (toString v)
+    else if builtins.isList v then
+      "[${concatMapStringsSep "," renderAnnotated v}]"
+    else if builtins.isString v then
+      toString (lib.gvariant.mkString v)
+    else if builtins.isBool v then
+      toString (lib.gvariant.mkBoolean v)
+    else if builtins.isInt v || builtins.isFloat v then
+      toString v
+    else if v == null then
+      "nothing"
+    else
+      throw "lib.gvariant: cannot serialize ${builtins.typeOf v} as an annotated value.";
+
   type = {
     arrayOf = t: "a${t}";
     maybeOf = t: "m${t}";
@@ -51,6 +70,183 @@ in
 rec {
 
   inherit type;
+
+  /**
+    Annotate a value with a GVariant type string, without converting it.
+    Scalars are serialized without an inferred type, lists become arrays (also
+    when empty), and `null` becomes `nothing`. Tuples and dictionary entries
+    inherit their types from the surrounding annotation, including nested
+    lists and empty arrays. Explicit scalar constructors, arrays, annotations,
+    casts, and variant contents retain their own type constraints.
+
+    Tuples and dictionary entries containing raw integers or empty lists can
+    be context-dependent intermediates: forcing their `.type` or standalone
+    `toString` may throw because those members have no inferred type.
+    `mkTyped` can serialize them through their unannotated rendering path,
+    without forcing that inferred type; the surrounding annotation supplies it.
+
+    As with the other constructors, the caller must provide a valid type and
+    a compatible value. GLib validates the type string, numeric ranges, and
+    compatibility when parsing the result; this helper does not remove
+    explicit annotations. GLib gives an outer type precedence over nested
+    annotations where the literal is compatible with that outer type.
+
+    # Inputs
+
+    `t`
+    : A definite GVariant type string, for example `u`, `ms`, or `a{sv}`.
+
+    `v`
+    : A Nix scalar, list, or value built with a GVariant constructor.
+
+    # Type
+
+    ```
+    mkTyped :: String -> Any -> GVariant
+    ```
+
+    # Examples
+    :::{.example}
+    ## `lib.gvariant.mkTyped` usage example
+
+    ```nix
+    lib.gvariant.mkTyped "u" 5
+    # => @u 5
+    ```
+    :::
+  */
+  mkTyped =
+    t: v:
+    mkPrimitive t v
+    // {
+      __toString = self: "@${self.type} ${renderAnnotated self.value}";
+    };
+
+  /**
+    Add a GVariant type keyword. This is a type annotation, not a conversion.
+    The supported keywords are `boolean`, `byte`, `int16`, `uint16`, `int32`,
+    `uint32`, `handle`, `int64`, `uint64`, `double`, `string`, `objectpath`,
+    and `signature`. Unknown keywords are rejected.
+
+    # Inputs
+
+    `name`
+    : The type keyword.
+
+    `v`
+    : The value to annotate, as for `mkTyped`.
+
+    # Type
+
+    ```
+    mkCast :: String -> Any -> GVariant
+    ```
+
+    # Examples
+    :::{.example}
+    ## `lib.gvariant.mkCast` usage example
+
+    ```nix
+    lib.gvariant.mkCast "handle" 22
+    # => handle 22
+    ```
+    :::
+  */
+  mkCast =
+    name: v:
+    let
+      types = {
+        boolean = "b";
+        byte = "y";
+        int16 = "n";
+        uint16 = "q";
+        int32 = "i";
+        uint32 = "u";
+        handle = "h";
+        int64 = "x";
+        uint64 = "t";
+        double = "d";
+        string = "s";
+        objectpath = "o";
+        signature = "g";
+      };
+      t = types.${name} or (throw "lib.gvariant.mkCast: unknown type keyword ${name}.");
+    in
+    builtins.seq t (
+      mkPrimitive t v
+      // {
+        __toString = self: "${name} ${renderAnnotated self.value}";
+      }
+    );
+
+  /**
+    Construct a GVariant byte string (`ay`) from a string containing GVariant
+    byte-string escapes, as emitted by dconf2nix. Backslash escapes (including
+    octal escapes) are preserved, not escaped a second time. Quotes and literal
+    newlines are escaped safely. A dangling backslash is rejected.
+
+    GLib treats the result as a zero-terminated byte string (an escaped zero
+    terminates its contents). This is not a constructor for raw Nix string
+    bytes: use `\\` for a literal backslash and `\377` for byte 255.
+
+    # Inputs
+
+    `v`
+    : Byte-string contents, without the `b` prefix or surrounding quotes.
+
+    # Type
+
+    ```
+    mkByteString :: String -> GVariant
+    ```
+
+    # Examples
+    :::{.example}
+    ## `lib.gvariant.mkByteString` usage example
+
+    ```nix
+    lib.gvariant.mkByteString ''/home/alice/Music''
+    # => b"/home/alice/Music"
+    lib.gvariant.mkByteString ''\\377\\n''
+    # => b"\\377\\n"
+    ```
+    :::
+  */
+  mkByteString =
+    v:
+    mkPrimitive (type.arrayOf type.uchar) v
+    // {
+      __toString =
+        self:
+        let
+          escaped = concatStrings (
+            map (
+              part:
+              if builtins.isList part then
+                # GLib discards escaped LF as a continuation. Keeping it would
+                # split the surrounding dconf keyfile entry across lines.
+                let
+                  escapedPart = head part;
+                  octal = builtins.match "\\\\([0-7]{1,3})\\\\\n" escapedPart;
+                in
+                if octal != null then
+                  # Removing a continuation must not join an octal escape to
+                  # following digits (e.g. \\1 followed by 7 is not \\17).
+                  "\\${lib.fixedWidthString 3 "0" (head octal)}"
+                else if escapedPart == "\\\n" then
+                  ""
+                else
+                  escapedPart
+              else if lib.hasInfix "\\" part then
+                throw "lib.gvariant.mkByteString: dangling backslash."
+              else
+                builtins.replaceStrings [ "\"" "\n" "\r" ] [ "\\\"" "\\n" "\\r" ] part
+            ) (builtins.split "(\\\\[0-7]{1,3}\\\\\n|\\\\(.|\n))" self.value)
+          );
+        in
+        # builtins.split discards string context; retain input dependencies.
+        builtins.appendContext "b\"${escaped}\"" (builtins.getContext self.value);
+    };
 
   /**
     Check if a value is a GVariant value
@@ -282,6 +478,12 @@ rec {
   /**
     Returns the GVariant dictionary entry from the given key and value.
 
+    With raw integers or empty lists, the result is a context-dependent
+    intermediate: forcing `.type` or standalone `toString` may throw.
+    Use `mkTyped` with a compatible surrounding type to serialize the entry
+    through its unannotated rendering path instead, or use explicitly typed
+    members for a standalone entry.
+
     # Inputs
 
     `name`
@@ -323,6 +525,7 @@ rec {
     mkPrimitive dictionaryType { inherit name value; }
     // {
       __toString = self: "@${self.type} {${name'},${value'}}";
+      __unannotatedString = _: "{${renderAnnotated name},${renderAnnotated value}}";
     };
 
   /**
@@ -372,6 +575,11 @@ rec {
   /**
     Returns the GVariant just from the given Nix value.
 
+    Like tuples and dictionary entries, this can be a context-dependent
+    intermediate: raw integers and empty lists require a surrounding `mkTyped`
+    annotation. Standalone rendering and `.type` still require an inferable
+    element type. Explicit annotations and variant boundaries are preserved.
+
     # Inputs
 
     `elem`
@@ -389,10 +597,19 @@ rec {
     let
       gvarElem = mkValue elem;
     in
-    mkMaybe gvarElem.type gvarElem;
+    mkMaybe gvarElem.type gvarElem
+    // {
+      __unannotatedString = _: "just ${renderAnnotated elem}";
+    };
 
   /**
     Returns the GVariant tuple from the given Nix list.
+
+    With raw integers or empty lists as members, the result is a
+    context-dependent intermediate: forcing `.type` or standalone `toString`
+    may throw. Use `mkTyped` with a compatible surrounding type to serialize
+    the tuple through its unannotated rendering path instead, or use
+    explicitly typed members for a standalone tuple.
 
     # Inputs
 
@@ -414,7 +631,16 @@ rec {
     in
     mkPrimitive tupleType gvarElems
     // {
-      __toString = self: "@${self.type} (${concatMapStringsSep "," toString self.value})";
+      __toString =
+        self:
+        "@${self.type} (${concatMapStringsSep "," toString self.value}${
+          lib.optionalString (builtins.length self.value == 1) ","
+        })";
+      __unannotatedString =
+        _:
+        "(${concatMapStringsSep "," renderAnnotated elems}${
+          lib.optionalString (builtins.length elems == 1) ","
+        })";
     };
 
   /**
@@ -436,6 +662,7 @@ rec {
     v:
     mkPrimitive type.boolean v
     // {
+      __annotatedString = "@b ${if v then "true" else "false"}";
       __toString = self: if self.value then "true" else "false";
     };
 
@@ -461,6 +688,7 @@ rec {
     in
     mkPrimitive type.string v
     // {
+      __annotatedString = "@s '${sanitize v}'";
       __toString = self: "'${sanitize self.value}'";
     };
 
@@ -538,6 +766,7 @@ rec {
     v:
     mkPrimitive type.int32 v
     // {
+      __annotatedString = "@i ${toString v}";
       __toString = self: toString self.value;
     };
 
@@ -593,6 +822,7 @@ rec {
     v:
     mkPrimitive type.double v
     // {
+      __annotatedString = "@d ${toString v}";
       __toString = self: toString self.value;
     };
 }
